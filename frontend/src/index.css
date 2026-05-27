@@ -1,0 +1,33 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,700;1,400&family=Rajdhani:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Base resets ── */
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body, #root {
+  height: 100%;
+  background: #07070f;
+  color: #b8b8d8;
+}
+
+/* ── Custom scrollbar ── */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: #0c0c1a; }
+::-webkit-scrollbar-thumb { background: #2e2e5a; border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: #4a4a7a; }
+
+/* ── Number input — hide spinners ── */
+input[type='number']::-webkit-inner-spin-button,
+input[type='number']::-webkit-outer-spin-button { -webkit-appearance: none; }
+input[type='number'] { -moz-appearance: textfield; }
+
+/* ── Price flash animations ── */
+@keyframes flash-green { 0% { background-color: rgba(0,255,136,0.2); } 100% { background-color: transparent; } }
+@keyframes flash-red   { 0% { background-color: rgba(255,51,85,0.2);  } 100% { background-color: transparent; } }
+
+.flash-green { animation: flash-green 0.6s ease-out; }
+.flash-red   { animation: flash-red   0.6s ease-out; }

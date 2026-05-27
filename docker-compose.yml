@@ -1,0 +1,86 @@
+version: '3.9'
+
+services:
+
+  # ── PostgreSQL ────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: cryptouser
+      POSTGRES_PASSWORD: cryptopass
+      POSTGRES_DB: cryptotracker
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U cryptouser -d cryptotracker']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── Redis ──────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - '6379:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ── Price Service ──────────────────────────────────────────────────────────
+  price-service:
+    build: ./services/price-service
+    restart: unless-stopped
+    env_file: ./services/price-service/.env
+    ports:
+      - '3002:3002'
+    environment:
+      PORT: 3002
+
+  # ── Gateway ────────────────────────────────────────────────────────────────
+  gateway:
+    build: ./services/gateway
+    restart: unless-stopped
+    env_file: ./services/gateway/.env
+    ports:
+      - '3001:3001'
+    environment:
+      PORT: 3001
+      DATABASE_URL: postgresql://cryptouser:cryptopass@postgres:5432/cryptotracker?sslmode=disable
+      REDIS_URL: redis://redis:6379
+      PRICE_SERVICE_URL: http://price-service:3002
+      CORS_ORIGIN: http://localhost:5173
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      price-service:
+        condition: service_started
+
+  # ── Notifier ───────────────────────────────────────────────────────────────
+  notifier:
+    build: ./services/notifier
+    restart: unless-stopped
+    env_file: ./services/notifier/.env
+    ports:
+      - '3003:3003'
+    environment:
+      PORT: 3003
+      DATABASE_URL: postgresql://cryptouser:cryptopass@postgres:5432/cryptotracker?sslmode=disable
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      gateway:
+        condition: service_started
+
+volumes:
+  postgres_data:
