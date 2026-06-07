@@ -50,13 +50,8 @@ app.use('/api/portfolio', portfolioRoutes);
 app.use('/api/alerts',    alertRoutes);
 
 // Health check
-app.get('/health', async (req, res) => {
-  try {
-    await pool.healthCheck();
-    res.json({ status: 'ok', db: 'connected', uptime: process.uptime() });
-  } catch (err) {
-    res.status(503).json({ status: 'degraded', db: 'disconnected', error: err.message });
-  }
+app.get('/health', (req, res) => {
+  res.send('ok');
 });
 
 // 404 catch-all
