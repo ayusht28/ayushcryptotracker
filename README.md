@@ -1,196 +1,171 @@
-# CryptoTracker Pro
+# patchwork
 
-Real-time cryptocurrency portfolio management platform built with Node.js microservices and a React frontend.
-
-## Architecture
-
-```
-┌────────────────────────────────────────────────────────────────┐
-│  CoinGecko API ──┐                                             │
-│  Frankfurter  ──►│  Price Service :3002  (polling, cache)     │
-│                  └──────────────────┬──────────────────────── │
-│                                     │ HTTP GET /prices every 60s
-│  Frontend :5173 ◄──── WebSocket ────┤                         │
-│      │                              ▼                         │
-│      └──── REST ──────► Gateway :3001 ──► PostgreSQL (Neon)   │
-│                             │                                  │
-│                             └──► Redis pub/sub (Upstash)      │
-│                                         │                     │
-│                              Notifier :3003 (subscriber)      │
-│                                         │                     │
-│                                         └──► PostgreSQL       │
-└────────────────────────────────────────────────────────────────┘
-```
-
-| Service       | Port | Role                                      | Deploy     |
-|---------------|------|-------------------------------------------|------------|
-| Price Service | 3002 | Polls CoinGecko + Frankfurter, caches data | Render     |
-| Gateway       | 3001 | REST API + WebSocket + DB writes           | Render     |
-| Notifier      | 3003 | Alert evaluation via Redis pub/sub         | Render     |
-| Frontend      | 5173 | React SPA — 4 tabs                        | Vercel     |
+A self-healing Python code agent. Give it buggy code, it runs it, reads the error, fixes it using an LLM, and reruns. Repeats until the code passes or the retry limit is hit.
 
 ---
 
-## Local Development
+## How it works
 
-### Prerequisites
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/)
-- Node.js 20+
+1. Takes buggy Python code as input (file, folder, or raw string)
+2. Runs it in a subprocess
+3. If it fails, sends the code and error to the Groq LLM
+4. Gets fixed code back
+5. Runs it again
+6. Repeats up to 5 times
+7. Reports success or failure with full attempt log
 
-### 1. Clone and set up environment files
+---
 
-```bash
-git clone https://github.com/your-org/cryptotracker-nodejs.git
-cd cryptotracker-nodejs
+## Stack
 
-# Copy env examples
-cp services/price-service/.env.example services/price-service/.env
-cp services/gateway/.env.example        services/gateway/.env
-cp services/notifier/.env.example       services/notifier/.env
-cp frontend/.env.example                frontend/.env.local
+- Python 3.9+
+- Groq API (llama-3.3-70b-versatile)
+- python-dotenv
+- requests
+- subprocess (standard library)
+
+---
+
+## Project structure
+
 ```
-
-### 2. Start backend services + databases
-
-```bash
-# Starts postgres, redis, price-service, gateway, notifier
-docker-compose up -d
-
-# Watch logs
-docker-compose logs -f gateway
-```
-
-### 3. Run database migrations
-
-```bash
-docker-compose exec gateway node /app/../../../database/migrate.js
-# Or locally:
-DATABASE_URL=postgresql://cryptouser:cryptopass@localhost:5432/cryptotracker node database/migrate.js
-```
-
-### 4. Start the frontend (hot reload)
-
-```bash
-cd frontend
-npm install
-npm run dev
-# Open http://localhost:5173
+patchwork/
+├── agent.py            # core feedback loop
+├── tools.py            # code execution via subprocess
+├── llm.py              # groq api client
+├── memory.py           # stores attempt history
+├── main.py             # entry point, argument parsing
+├── config.py           # loads env variables
+├── .env.example        # template for environment variables
+├── .gitignore
+├── requirements.txt
+└── README.md
 ```
 
 ---
 
-## Production Deployment
+## Setup
 
-### Infrastructure Setup (order matters)
+### 1. Clone the repo
 
-**Step 1 — Neon PostgreSQL**
-1. Create a free account at [neon.tech](https://neon.tech)
-2. Create a new project → copy the connection string
-3. Run migrations: `psql $DATABASE_URL -f database/init.sql`
-4. Enable PgBouncer connection pooling in the Neon dashboard
+```
+git clone https://github.com/ayusht28/patchwork.git
+cd patchwork
+```
 
-**Step 2 — Upstash Redis**
-1. Create a free account at [upstash.com](https://upstash.com)
-2. Create a Redis database → copy the `rediss://` URL (TLS required)
+### 2. Create virtual environment
 
-**Step 3 — Deploy Price Service to Render**
-1. Create a new Web Service from the `services/price-service` directory
-2. Build command: `npm ci`
-3. Start command: `node src/index.js`
-4. No env vars required except `PORT=3002` (set automatically by Render)
-5. Note the service URL (e.g. `https://cryptotracker-price.onrender.com`)
+```
+python3 -m venv venv
+source venv/bin/activate
+```
 
-**Step 4 — Deploy Gateway to Render**
-1. Create a new Web Service from `services/gateway`
-2. Set environment variables:
-   - `DATABASE_URL` → Neon connection string
-   - `REDIS_URL` → Upstash `rediss://` URL
-   - `PRICE_SERVICE_URL` → Price Service URL from Step 3
-   - `CORS_ORIGIN` → Vercel frontend URL (set after Step 6, update later)
-3. Enable **WebSocket support** in Render service settings
+### 3. Install dependencies
 
-**Step 5 — Deploy Notifier to Render**
-1. Create a new Web Service from `services/notifier`
-2. Set `DATABASE_URL` and `REDIS_URL`
+```
+pip install -r requirements.txt
+```
 
-**Step 6 — Deploy Frontend to Vercel**
-1. Import the `frontend` directory from GitHub
-2. Set environment variables:
-   - `VITE_API_URL` → Gateway URL from Step 4
-   - `VITE_WS_URL` → Gateway URL with `wss://` scheme
-3. Vercel auto-deploys on every push to `main`
+### 4. Add Groq API key
 
-**Step 7 — Update CORS**
-Update `CORS_ORIGIN` in Gateway env vars to the Vercel URL.
+```
+cp .env.example .env
+```
 
-### Preventing Cold Starts (Render free tier)
-Render free services sleep after 15 min of inactivity. Set up a free cron at [cron-job.org](https://cron-job.org) to ping `/health` on Gateway and Price Service every 14 minutes.
+Open .env and add your key:
+
+```
+GROQ_API_KEY=your_key_here
+```
+
+Get a free key at https://console.groq.com
 
 ---
 
-## CI/CD
+## Usage
 
-Push to `main` → GitHub Actions runs lint/build for all services → triggers Render deploy hooks.
+Run on a single file:
+```
+python3 main.py --file buggy_script.py
+```
 
-**Required GitHub Secrets:**
-- `RENDER_PRICE_HOOK` — Render deploy hook URL for Price Service
-- `RENDER_GATEWAY_HOOK` — Render deploy hook URL for Gateway
-- `RENDER_NOTIFIER_HOOK` — Render deploy hook URL for Notifier
+Run on a folder of files:
+```
+python3 main.py --folder /path/to/scripts/
+```
 
----
-
-## API Reference
-
-### Market
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/market/prices` | All live coin prices |
-| GET | `/api/market/history/:coinId?limit=100` | Price history for charting |
-| GET | `/api/market/rates` | Fiat exchange rates (base USD) |
-
-### Portfolio
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/portfolio/init` | Create default portfolio if needed |
-| GET | `/api/portfolio/:id` | Full portfolio with unrealized P&L |
-| GET | `/api/portfolio/:id/trades` | Paginated trade history |
-| GET | `/api/portfolio/:id/closed` | Closed positions + realized P&L |
-| POST | `/api/portfolio/:id/trade` | Execute buy/sell/short/cover |
-| POST | `/api/portfolio/:id/squareoff` | Close all positions at market price |
-
-### Alerts
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/alerts/:portfolioId?status=active` | List alerts |
-| POST | `/api/alerts/:portfolioId` | Create alert |
-| DELETE | `/api/alerts/:alertId` | Delete alert |
-
-### WebSocket (`ws://gateway/ws`)
-```json
-// Server → client
-{ "type": "prices", "data": [...coins], "timestamp": "2024-01-01T00:00:00Z" }
-
-// Client → server (keep-alive)
-{ "type": "ping" }
+Pass code directly:
+```
+python3 main.py --code "print(hello)"
 ```
 
 ---
 
-## Tech Stack
+## Arguments
 
-| Layer | Tech |
-|-------|------|
-| Backend | Node.js 20, Express 4, ws, pg, ioredis |
-| Database | PostgreSQL 16 on Neon (free tier) |
-| Cache/Pub-Sub | Redis 7 on Upstash (free tier) |
-| Frontend | React 18, Vite 5, Tailwind CSS 3, Recharts |
-| External APIs | CoinGecko (prices), Frankfurter (fiat rates) |
-| Hosting | Render (backend), Vercel (frontend) |
+| Argument | Short | Description |
+|----------|-------|-------------|
+| --file | -f | path to a single .py file |
+| --code | -c | python code as a string |
+| --folder | none | path to folder of .py files |
+
+Only one argument can be used at a time.
 
 ---
 
-## Known Limitations (v1)
-- No authentication — single-user, single-portfolio
-- Render free tier cold starts (30–60s after 15 min idle)
-- Alerts only update in the DB; no push notifications yet
-- `price_history` table grows indefinitely — run the cleanup query in `init.sql` periodically
+## Configuration
+
+All configuration is set via environment variables in the .env file.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| GROQ_API_KEY | none | required, get from console.groq.com |
+| MAX_RETRIES | 5 | max fix attempts per file |
+| EXECUTION_TIMEOUT | 10 | max seconds per code run |
+| MAX_CODE_CHARS | 10000 | max input code size |
+| MAX_OUTPUT_CHARS | 3000 | max captured output size |
+
+---
+
+## Exit codes
+
+| Code | Meaning |
+|------|---------|
+| 0 | success |
+| 1 | task failed (no files found, config error) |
+| 2 | bad input (file not found, unreadable file) |
+
+---
+
+## Security
+
+- Code runs in a subprocess, not inside the agent process
+- Subprocess has a hard timeout of 10 seconds
+- shell=True is never used
+- stdout and stderr are capped before being sent to the LLM
+- API key is loaded from .env only, never logged or printed
+- .env is listed in .gitignore
+
+---
+
+## Limitations
+
+- Python files only
+- Single file scripts only, no multi-file projects
+- No package installation, if the code needs a missing library it will fail
+- Agent only checks for zero exit code, not logical correctness
+
+---
+
+## Requirements
+
+```
+requests==2.31.0
+python-dotenv==1.0.1
+```
+
+---
+
+## License
+
+MIT
