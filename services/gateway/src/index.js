@@ -14,6 +14,7 @@ const { startPolling } = require('./pricePoller');
 const marketRoutes    = require('./routes/market');
 const portfolioRoutes = require('./routes/portfolio');
 const alertRoutes     = require('./routes/alerts');
+const portfoliosRoutes = require('./routes/portfolios');
 
 const PORT = parseInt(process.env.PORT || '3001', 10);
 
@@ -48,6 +49,7 @@ app.use('/api', rateLimit({
 app.use('/api/market',    marketRoutes);
 app.use('/api/portfolio', portfolioRoutes);
 app.use('/api/alerts',    alertRoutes);
+app.use('/api/portfolios', portfoliosRoutes);
 
 // Health check
 app.get('/health', async (req, res) => {
