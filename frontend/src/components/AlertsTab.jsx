@@ -3,13 +3,14 @@ import { Panel, Badge, Input, Select, Button, Label, formatPrice, formatTime } f
 import { fetchAlerts, createAlert, deleteAlert, getErrorMessage } from '../api/gateway';
 
 export default function AlertsTab({ portfolioId, prices, D }) {
-  const [alerts,  setAlerts]  = useState([]);
-  const [coinId,  setCoinId]  = useState('');
-  const [cond,    setCond]    = useState('above');
-  const [target,  setTarget]  = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error,   setError]   = useState('');
-  const [success, setSuccess] = useState('');
+  const [alerts,         setAlerts]         = useState([]);
+  const [coinId,         setCoinId]         = useState('');
+  const [cond,           setCond]           = useState('above');
+  const [target,         setTarget]         = useState('');
+  const [loading,        setLoading]        = useState(false);
+  const [deleteConfirm,  setDeleteConfirm]  = useState(null);
+  const [error,          setError]          = useState('');
+  const [success,        setSuccess]        = useState('');
 
   useEffect(function setDefaultCoin() {
     if (prices.length && !coinId) setCoinId(prices[0].id);
@@ -33,7 +34,7 @@ export default function AlertsTab({ portfolioId, prices, D }) {
 
   async function handleCreate() {
     const tp = parseFloat(target);
-    if (!coinId) return setError('Select a coin');
+    if (!coinId)             return setError('Select a coin');
     if (isNaN(tp) || tp <= 0) return setError('Enter a valid target price');
 
     setLoading(true);
@@ -57,6 +58,7 @@ export default function AlertsTab({ portfolioId, prices, D }) {
   async function handleDelete(alertId) {
     try {
       await deleteAlert(alertId);
+      setDeleteConfirm(null);
       loadAlerts();
     } catch (err) {
       setError(getErrorMessage(err));
@@ -89,8 +91,15 @@ export default function AlertsTab({ portfolioId, prices, D }) {
             Active Alerts ({activeAlerts.length})
           </div>
           {activeAlerts.length === 0
-            ? <div style={{ padding: 32, textAlign: 'center', color: D.textDim, fontSize: 13 }}>No active alerts</div>
-            : <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            ? (
+              <div style={{ padding: 48, textAlign: 'center' }}>
+                <div style={{ fontSize: 36, marginBottom: 12 }}>🔔</div>
+                <div style={{ fontSize: 15, fontWeight: 600, color: D.textBright, marginBottom: 6 }}>No active alerts</div>
+                <div style={{ fontSize: 13, color: D.textDim }}>Create an alert to get notified when a coin hits your target price</div>
+              </div>
+            )
+            : (
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead><tr><Th>Coin</Th><Th>Condition</Th><Th right>Target</Th><Th right>Current</Th><Th right>Distance</Th><Th right></Th></tr></thead>
                 <tbody>
                   {activeAlerts.map(function(alert) {
@@ -104,15 +113,26 @@ export default function AlertsTab({ portfolioId, prices, D }) {
                         <Td right style={{ color: D.textBright }}>{formatPrice(current)}</Td>
                         <Td right><Badge label={(distance >= 0 ? '+' : '') + distance.toFixed(2) + '%'} color={distance >= 0 ? D.green : D.red} /></Td>
                         <Td right>
-                          <button onClick={() => handleDelete(alert.id)} style={{ fontSize: 11, color: D.red, background: 'none', border: `1px solid ${D.border}`, borderRadius: 4, padding: '3px 8px', cursor: 'pointer' }}>
-                            Delete
-                          </button>
+                          {deleteConfirm === alert.id
+                            ? (
+                              <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
+                                <button onClick={() => setDeleteConfirm(null)} style={{ fontSize: 11, color: D.textDim, background: 'none', border: `1px solid ${D.border}`, borderRadius: 4, padding: '3px 8px', cursor: 'pointer' }}>Cancel</button>
+                                <button onClick={() => handleDelete(alert.id)} style={{ fontSize: 11, color: '#fff', background: D.red, border: 'none', borderRadius: 4, padding: '3px 8px', cursor: 'pointer' }}>Confirm</button>
+                              </div>
+                            )
+                            : (
+                              <button onClick={() => setDeleteConfirm(alert.id)} style={{ fontSize: 11, color: D.red, background: 'none', border: `1px solid ${D.border}`, borderRadius: 4, padding: '3px 8px', cursor: 'pointer' }}>
+                                Delete
+                              </button>
+                            )
+                          }
                         </Td>
                       </tr>
                     );
                   })}
                 </tbody>
               </table>
+            )
           }
         </Panel>
 
@@ -141,7 +161,7 @@ export default function AlertsTab({ portfolioId, prices, D }) {
         )}
       </div>
 
-      {/* Create form */}
+      {/* Create alert form */}
       <Panel D={D} style={{ position: 'sticky', top: 80 }}>
         <div style={{ padding: '12px 16px', borderBottom: `1px solid ${D.border}`, fontSize: 13, fontWeight: 600, color: D.textBright }}>New Alert</div>
         <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
