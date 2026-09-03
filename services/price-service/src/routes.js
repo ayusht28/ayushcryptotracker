@@ -37,7 +37,12 @@ router.get('/rates', (req, res) => {
 
 // GET /health
 router.get('/health', (req, res) => {
-  res.send('ok');
+  res.json({
+    status: 'ok',
+    last_coin_poll: cache.getLastCoinPoll(),
+    last_rate_poll: cache.getLastRatePoll(),
+    stale: cache.isStale(),
+  });
 });
 
 module.exports = router;

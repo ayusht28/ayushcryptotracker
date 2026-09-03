@@ -1,305 +1,258 @@
 import { useState, useCallback, useEffect } from 'react';
+import { Panel, CoinAvatar, Badge, formatPnl, formatPct, formatQty, formatPrice, formatTime } from './ui';
 import TradeModal from './TradeModal';
-import PriceChart from './PriceChart';
 import { squareOffAll, fetchHistory, getErrorMessage } from '../api/gateway';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 
-const fmtUsd = n => {
-  if (n === undefined || n === null) return '—';
-  return `$${Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-};
-const fmtPnl = n => {
-  if (n === undefined || n === null) return '—';
-  return `${n >= 0 ? '+' : '-'}$${Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-};
-const fmtQty  = n => n ? (+n).toFixed(Math.abs(+n) < 1 ? 6 : 4).replace(/\.?0+$/, '') : '—';
-const fmtPct  = n => `${n >= 0 ? '+' : ''}${(+n).toFixed(2)}%`;
-const fmtTime = d => d ? new Date(d).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
-
-const TRADE_COLORS_MAP = { buy: '#00ff88', sell: '#ff3355', short: '#ffd700', cover: '#00d4ff' };
+const SUBTABS = ['Holdings', 'History', 'Closed', 'Performance'];
 
 export default function PortfolioTab({ portfolioId, portfolio, prices, coins, onRefresh, D }) {
-  const [subTab, setSubTab]       = useState('holdings');
-  const [showTrade, setShowTrade] = useState(false);
-  const [showSqOff, setShowSqOff] = useState(false);
-  const [sqLoading, setSqLoading] = useState(false);
-  const [sqError, setSqError]     = useState('');
-  const [perfData, setPerfData]   = useState([]);
+  const [subTab,      setSubTab]      = useState('Holdings');
+  const [showTrade,   setShowTrade]   = useState(false);
+  const [showSquare,  setShowSquare]  = useState(false);
+  const [squareLoad,  setSquareLoad]  = useState(false);
+  const [squareErr,   setSquareErr]   = useState('');
+  const [perfData,    setPerfData]    = useState([]);
   const [perfLoading, setPerfLoading] = useState(false);
 
-  const getPrice = useCallback(coinId => {
-    const c = prices.find(p => p.id === coinId);
-    return c ? parseFloat(c.price_usd) : 0;
+  const getPrice = useCallback(function(coinId) {
+    const coin = prices.find(p => p.id === coinId);
+    return coin ? parseFloat(coin.price_usd) : 0;
   }, [prices]);
 
-  // Build portfolio performance data from price history
-  useEffect(() => {
-    if (subTab !== 'performance') return;
+  useEffect(function loadPerformanceData() {
+    if (subTab !== 'Performance') return;
     const holdings = portfolio?.holdings ?? [];
     if (!holdings.length) return;
+
     setPerfLoading(true);
 
-    Promise.all(holdings.map(h => fetchHistory(h.coin_id, 48).then(d => ({ coinId: h.coin_id, history: d.history ?? [], holding: h }))))
-      .then(results => {
-        // Find common timestamps
-        const allTimes = results[0]?.history.map(r => r.created_at) ?? [];
-        const data = allTimes.map(t => {
-          let totalVal = 0;
-          results.forEach(({ history, holding }) => {
-            const point = history.find(h => h.created_at === t);
-            if (point && holding.position_type === 'long') {
-              totalVal += parseFloat(point.price_usd) * parseFloat(holding.quantity);
-            }
-          });
-          return {
-            t: new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            value: parseFloat(totalVal.toFixed(2))
-          };
-        }).filter(d => d.value > 0);
-        setPerfData(data);
-      })
-      .catch(console.error)
-      .finally(() => setPerfLoading(false));
+    const requests = holdings.map(h => fetchHistory(h.coin_id, 48).then(d => ({ coinId: h.coin_id, history: d.history ?? [], holding: h })));
+
+    Promise.all(requests).then(function(results) {
+      const times = results[0]?.history.map(r => r.created_at) ?? [];
+      const data  = times.map(function(t) {
+        let totalValue = 0;
+        results.forEach(function({ history, holding }) {
+          const point = history.find(h => h.created_at === t);
+          if (point && holding.position_type === 'long') {
+            totalValue += parseFloat(point.price_usd) * parseFloat(holding.quantity);
+          }
+        });
+        return {
+          t:     new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          value: parseFloat(totalValue.toFixed(2)),
+        };
+      }).filter(d => d.value > 0);
+      setPerfData(data);
+    }).catch(console.error).finally(() => setPerfLoading(false));
   }, [subTab, portfolio?.holdings]);
 
-  const handleSquareOff = async () => {
-    setSqLoading(true); setSqError('');
+  async function handleSquareOff() {
+    setSquareLoad(true);
+    setSquareErr('');
     try {
       await squareOffAll(portfolioId);
-      setShowSqOff(false);
+      setShowSquare(false);
       onRefresh();
     } catch (err) {
-      setSqError(getErrorMessage(err));
+      setSquareErr(getErrorMessage(err));
     } finally {
-      setSqLoading(false);
+      setSquareLoad(false);
     }
-  };
+  }
 
-  const { holdings = [], trades = [], closed_positions: closed = [], total_value, total_unrealized, total_realized } = portfolio || {};
+  const holdings = portfolio?.holdings         ?? [];
+  const trades   = portfolio?.trades           ?? [];
+  const closed   = portfolio?.closed_positions ?? [];
+  const totalVal = portfolio?.total_value      ?? 0;
+  const totalUnr = portfolio?.total_unrealized ?? 0;
+  const totalRel = portfolio?.total_realized   ?? 0;
 
-  const panel = { background: D.panel, border: `1px solid ${D.border}`, borderRadius: 8 };
-  const th = { padding: '10px 16px', fontSize: 11, letterSpacing: 2, color: D.textDim, fontWeight: 700, textTransform: 'uppercase', borderBottom: `1px solid ${D.border}`, whiteSpace: 'nowrap' };
-
-  const CustomTooltip = ({ active, payload }) => {
-    if (!active || !payload?.length) return null;
+  function SummaryCard({ label, value, color }) {
     return (
-      <div style={{ background: D.panel, border: `1px solid ${D.border}`, padding: '8px 12px', borderRadius: 6, fontFamily: 'monospace', fontSize: 12 }}>
-        <div style={{ color: D.textDim }}>{payload[0].payload.t}</div>
-        <div style={{ color: D.textBright, fontWeight: 700 }}>${payload[0].value?.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+      <div style={{ background: D.panel, border: `1px solid ${D.border}`, borderRadius: 8, padding: '16px' }}>
+        <div style={{ fontSize: 12, color: D.textDim, marginBottom: 8 }}>{label}</div>
+        <div style={{ fontSize: 20, fontWeight: 700, color: color || D.textBright }}>{value}</div>
       </div>
     );
-  };
+  }
+
+  function Th({ children, right }) {
+    return <th style={{ padding: '10px 16px', fontSize: 11, fontWeight: 500, color: D.textDim, textAlign: right ? 'right' : 'left', borderBottom: `1px solid ${D.border}` }}>{children}</th>;
+  }
+
+  function Td({ children, right, style }) {
+    return <td style={{ padding: '12px 16px', fontSize: 13, color: D.text, textAlign: right ? 'right' : 'left', borderBottom: `1px solid ${D.border}`, ...style }}>{children}</td>;
+  }
+
+  function PerfTooltip({ active, payload }) {
+    if (!active || !payload?.length) return null;
+    return (
+      <div style={{ background: D.panel, border: `1px solid ${D.border}`, borderRadius: 6, padding: '8px 12px' }}>
+        <div style={{ fontSize: 11, color: D.textDim }}>{payload[0].payload.t}</div>
+        <div style={{ fontSize: 13, fontWeight: 600, color: D.textBright }}>${payload[0].value?.toLocaleString('en-US', { minimumFractionDigits: 2 })}</div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       {/* Summary */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 12 }}>
-        {[
-          { label: 'Portfolio Value',  val: fmtUsd(total_value),      color: D.cyan },
-          { label: 'Unrealized P&L',   val: fmtPnl(total_unrealized), color: (total_unrealized ?? 0) >= 0 ? D.green : D.red },
-          { label: 'Realized P&L',     val: fmtPnl(total_realized),   color: (total_realized ?? 0)   >= 0 ? D.green : D.red },
-        ].map(s => (
-          <div key={s.label} style={{ ...panel, padding: '16px 20px' }}>
-            <div style={{ fontSize: 11, letterSpacing: 1.5, color: D.textDim, fontWeight: 700, textTransform: 'uppercase', marginBottom: 8 }}>{s.label}</div>
-            <div style={{ fontFamily: 'monospace', fontSize: 22, fontWeight: 800, color: s.color }}>{s.val}</div>
-          </div>
-        ))}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+        <SummaryCard label="Portfolio Value"  value={'$' + totalVal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} />
+        <SummaryCard label="Unrealized P&L"   value={formatPnl(totalUnr)} color={totalUnr >= 0 ? D.green : D.red} />
+        <SummaryCard label="Realized P&L"     value={formatPnl(totalRel)} color={totalRel >= 0 ? D.green : D.red} />
       </div>
 
-      {/* Sub-tabs */}
+      {/* Subtab nav + actions */}
       <div style={{ display: 'flex', alignItems: 'center', borderBottom: `1px solid ${D.border}` }}>
-        {['holdings', 'history', 'closed', 'performance'].map(t => (
-          <button key={t} onClick={() => setSubTab(t)} style={{
-            padding: '10px 18px', background: 'none', border: 'none',
-            borderBottom: `2px solid ${subTab === t ? D.cyan : 'transparent'}`,
-            color: subTab === t ? D.cyan : D.textDim,
-            fontWeight: 700, fontSize: 12, letterSpacing: 2, textTransform: 'uppercase',
-            cursor: 'pointer', transition: 'all 0.2s'
-          }}>{t}</button>
-        ))}
+        {SUBTABS.map(function(tab) {
+          const isActive = subTab === tab;
+          return (
+            <button
+              key={tab}
+              onClick={() => setSubTab(tab)}
+              style={{ padding: '10px 16px', fontSize: 13, fontWeight: isActive ? 600 : 400, color: isActive ? D.textBright : D.textDim, background: 'none', border: 'none', borderBottom: `2px solid ${isActive ? D.textBright : 'transparent'}`, cursor: 'pointer' }}
+            >
+              {tab}
+            </button>
+          );
+        })}
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, paddingBottom: 4 }}>
-          <button onClick={() => setShowTrade(true)} style={{
-            padding: '6px 14px', borderRadius: 5, cursor: 'pointer', fontSize: 11,
-            fontWeight: 700, letterSpacing: 1.5, textTransform: 'uppercase',
-            border: `1px solid ${D.green}`, color: D.green, background: `${D.green}10`, transition: 'all 0.2s'
-          }}>+ Trade</button>
-          <button onClick={() => setShowSqOff(true)} style={{
-            padding: '6px 14px', borderRadius: 5, cursor: 'pointer', fontSize: 11,
-            fontWeight: 700, letterSpacing: 1.5, textTransform: 'uppercase',
-            border: `1px solid ${D.red}`, color: D.red, background: `${D.red}10`, transition: 'all 0.2s'
-          }}>Square Off All</button>
+          <button onClick={() => setShowTrade(true)} style={{ fontSize: 12, fontWeight: 500, color: D.blue, background: 'none', border: `1px solid ${D.border}`, borderRadius: 5, padding: '5px 12px', cursor: 'pointer' }}>
+            New Trade
+          </button>
+          <button onClick={() => setShowSquare(true)} style={{ fontSize: 12, fontWeight: 500, color: D.red, background: 'none', border: `1px solid ${D.border}`, borderRadius: 5, padding: '5px 12px', cursor: 'pointer' }}>
+            Square Off All
+          </button>
         </div>
       </div>
 
       {/* Holdings */}
-      {subTab === 'holdings' && (
-        <div style={panel}>
-          {!holdings.length
-            ? <div style={{ padding: 40, textAlign: 'center', color: D.textDim, fontFamily: 'monospace', fontSize: 13 }}>No open positions</div>
-            : <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                  <thead><tr>
-                    {['Coin','Type','Qty','Avg Entry','Current','Unreal P&L','P&L %'].map((h,i) => (
-                      <th key={h} style={{ ...th, textAlign: i > 1 ? 'right' : 'left' }}>{h}</th>
-                    ))}
-                  </tr></thead>
-                  <tbody>
-                    {holdings.map(h => {
-                      const pnl = parseFloat(h.unrealized_pnl ?? 0);
-                      const pct = parseFloat(h.unrealized_pct ?? 0);
-                      const cur = parseFloat(h.current_price ?? getPrice(h.coin_id));
-                      return (
-                        <tr key={h.id} style={{ borderBottom: `1px solid ${D.border}` }}>
-                          <td style={{ padding: '12px 16px', fontWeight: 700, color: D.textBright, fontSize: 14 }}>{h.coin_symbol}</td>
-                          <td style={{ padding: '12px 16px' }}>
-                            <span style={{ fontSize: 11, fontFamily: 'monospace', padding: '2px 8px', borderRadius: 4, fontWeight: 700,
-                              color: h.position_type === 'long' ? D.green : D.red,
-                              background: h.position_type === 'long' ? `${D.green}15` : `${D.red}15`,
-                              border: `1px solid ${h.position_type === 'long' ? D.green : D.red}40`
-                            }}>{h.position_type.toUpperCase()}</span>
-                          </td>
-                          <td style={{ padding: '12px 16px', textAlign: 'right', fontFamily: 'monospace', color: D.text, fontSize: 13 }}>{fmtQty(h.quantity)}</td>
-                          <td style={{ padding: '12px 16px', textAlign: 'right', fontFamily: 'monospace', color: D.textDim, fontSize: 13 }}>${parseFloat(h.avg_buy_price).toFixed(cur > 10 ? 2 : 5)}</td>
-                          <td style={{ padding: '12px 16px', textAlign: 'right', fontFamily: 'monospace', color: D.textBright, fontSize: 13, fontWeight: 600 }}>${cur.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: cur > 10 ? 2 : 5 })}</td>
-                          <td style={{ padding: '12px 16px', textAlign: 'right', fontFamily: 'monospace', fontSize: 13, fontWeight: 700, color: pnl >= 0 ? D.green : D.red }}>{fmtPnl(pnl)}</td>
-                          <td style={{ padding: '12px 16px', textAlign: 'right' }}>
-                            <span style={{ fontSize: 12, fontFamily: 'monospace', padding: '2px 8px', borderRadius: 4,
-                              color: pct >= 0 ? D.green : D.red,
-                              background: pct >= 0 ? `${D.green}15` : `${D.red}15`,
-                              border: `1px solid ${pct >= 0 ? D.green : D.red}40`
-                            }}>{fmtPct(pct)}</span>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+      {subTab === 'Holdings' && (
+        <Panel D={D}>
+          {holdings.length === 0
+            ? <div style={{ padding: 40, textAlign: 'center', color: D.textDim, fontSize: 13 }}>No open positions</div>
+            : <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead><tr><Th>Coin</Th><Th>Type</Th><Th right>Qty</Th><Th right>Avg Entry</Th><Th right>Current</Th><Th right>P&L</Th><Th right>P&L %</Th></tr></thead>
+                <tbody>
+                  {holdings.map(function(h) {
+                    const pnl = parseFloat(h.unrealized_pnl ?? 0);
+                    const pct = parseFloat(h.unrealized_pct ?? 0);
+                    const cur = parseFloat(h.current_price  ?? getPrice(h.coin_id));
+                    return (
+                      <tr key={h.id}>
+                        <Td><div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><CoinAvatar symbol={h.coin_symbol} size={28} /><span style={{ fontWeight: 600, color: D.textBright }}>{h.coin_symbol}</span></div></Td>
+                        <Td><Badge label={h.position_type} color={h.position_type === 'long' ? D.green : D.red} /></Td>
+                        <Td right style={{ color: D.textBright }}>{formatQty(h.quantity)}</Td>
+                        <Td right style={{ color: D.textDim }}>{formatPrice(h.avg_buy_price)}</Td>
+                        <Td right style={{ color: D.textBright, fontWeight: 600 }}>{formatPrice(cur)}</Td>
+                        <Td right style={{ color: pnl >= 0 ? D.green : D.red, fontWeight: 600 }}>{formatPnl(pnl)}</Td>
+                        <Td right><Badge label={formatPct(pct)} color={pct >= 0 ? D.green : D.red} /></Td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
           }
-        </div>
+        </Panel>
       )}
 
       {/* Trade History */}
-      {subTab === 'history' && (
-        <div style={panel}>
-          {!trades.length
-            ? <div style={{ padding: 40, textAlign: 'center', color: D.textDim, fontFamily: 'monospace', fontSize: 13 }}>No trades yet</div>
-            : <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                  <thead><tr>
-                    {['Time','Coin','Type','Qty','Price','Total'].map((h,i) => (
-                      <th key={h} style={{ ...th, textAlign: i > 1 ? 'right' : 'left' }}>{h}</th>
-                    ))}
-                  </tr></thead>
-                  <tbody>
-                    {trades.map(t => (
-                      <tr key={t.id} style={{ borderBottom: `1px solid ${D.border}` }}>
-                        <td style={{ padding: '12px 16px', color: D.textDim, fontSize: 12, fontFamily: 'monospace' }}>{fmtTime(t.created_at)}</td>
-                        <td style={{ padding: '12px 16px', fontWeight: 700, color: D.textBright, fontSize: 14 }}>{t.coin_symbol}</td>
-                        <td style={{ padding: '12px 16px' }}>
-                          <span style={{ fontSize: 11, fontFamily: 'monospace', padding: '2px 8px', borderRadius: 4, fontWeight: 700,
-                            color: TRADE_COLORS_MAP[t.trade_type] || D.text,
-                            background: `${TRADE_COLORS_MAP[t.trade_type] || D.text}15`,
-                            border: `1px solid ${TRADE_COLORS_MAP[t.trade_type] || D.text}40`
-                          }}>{t.trade_type?.toUpperCase()}</span>
-                        </td>
-                        <td style={{ padding: '12px 16px', textAlign: 'right', fontFamily: 'monospace', color: D.text, fontSize: 13 }}>{fmtQty(t.quantity)}</td>
-                        <td style={{ padding: '12px 16px', textAlign: 'right', fontFamily: 'monospace', color: D.textDim, fontSize: 13 }}>{fmtUsd(t.price)}</td>
-                        <td style={{ padding: '12px 16px', textAlign: 'right', fontFamily: 'monospace', color: D.textBright, fontSize: 13, fontWeight: 600 }}>{fmtUsd(t.total_value)}</td>
+      {subTab === 'History' && (
+        <Panel D={D}>
+          {trades.length === 0
+            ? <div style={{ padding: 40, textAlign: 'center', color: D.textDim, fontSize: 13 }}>No trades yet</div>
+            : <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead><tr><Th>Time</Th><Th>Coin</Th><Th>Type</Th><Th right>Qty</Th><Th right>Price</Th><Th right>Total</Th></tr></thead>
+                <tbody>
+                  {trades.map(function(t) {
+                    const typeColors = { buy: D.green, sell: D.red, short: D.gold, cover: D.blue };
+                    return (
+                      <tr key={t.id}>
+                        <Td style={{ color: D.textDim, fontSize: 12 }}>{formatTime(t.created_at)}</Td>
+                        <Td style={{ fontWeight: 600, color: D.textBright }}>{t.coin_symbol}</Td>
+                        <Td><Badge label={t.trade_type} color={typeColors[t.trade_type] || D.text} /></Td>
+                        <Td right>{formatQty(t.quantity)}</Td>
+                        <Td right style={{ color: D.textDim }}>{formatPrice(t.price)}</Td>
+                        <Td right style={{ color: D.textBright, fontWeight: 600 }}>${parseFloat(t.total_value).toLocaleString('en-US', { minimumFractionDigits: 2 })}</Td>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    );
+                  })}
+                </tbody>
+              </table>
           }
-        </div>
+        </Panel>
       )}
 
       {/* Closed Positions */}
-      {subTab === 'closed' && (
-        <div style={panel}>
-          {!closed.length
-            ? <div style={{ padding: 40, textAlign: 'center', color: D.textDim, fontFamily: 'monospace', fontSize: 13 }}>No closed positions</div>
-            : <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                  <thead><tr>
-                    {['Closed At','Coin','Type','Qty','Entry','Exit','Realized P&L'].map((h,i) => (
-                      <th key={h} style={{ ...th, textAlign: i > 1 ? 'right' : 'left' }}>{h}</th>
-                    ))}
-                  </tr></thead>
-                  <tbody>
-                    {closed.map(p => (
-                      <tr key={p.id} style={{ borderBottom: `1px solid ${D.border}` }}>
-                        <td style={{ padding: '12px 16px', color: D.textDim, fontSize: 12, fontFamily: 'monospace' }}>{fmtTime(p.closed_at)}</td>
-                        <td style={{ padding: '12px 16px', fontWeight: 700, color: D.textBright, fontSize: 14 }}>{p.coin_symbol}</td>
-                        <td style={{ padding: '12px 16px' }}>
-                          <span style={{ fontSize: 11, fontFamily: 'monospace', padding: '2px 8px', borderRadius: 4, fontWeight: 700,
-                            color: p.position_type === 'long' ? D.green : D.red,
-                            background: p.position_type === 'long' ? `${D.green}15` : `${D.red}15`,
-                            border: `1px solid ${p.position_type === 'long' ? D.green : D.red}40`
-                          }}>{p.position_type?.toUpperCase()}</span>
-                        </td>
-                        <td style={{ padding: '12px 16px', textAlign: 'right', fontFamily: 'monospace', color: D.text, fontSize: 13 }}>{fmtQty(p.quantity)}</td>
-                        <td style={{ padding: '12px 16px', textAlign: 'right', fontFamily: 'monospace', color: D.textDim, fontSize: 13 }}>{fmtUsd(p.entry_price)}</td>
-                        <td style={{ padding: '12px 16px', textAlign: 'right', fontFamily: 'monospace', color: D.text, fontSize: 13 }}>{fmtUsd(p.exit_price)}</td>
-                        <td style={{ padding: '12px 16px', textAlign: 'right', fontFamily: 'monospace', fontSize: 13, fontWeight: 700, color: parseFloat(p.realized_pnl) >= 0 ? D.green : D.red }}>{fmtPnl(p.realized_pnl)}</td>
+      {subTab === 'Closed' && (
+        <Panel D={D}>
+          {closed.length === 0
+            ? <div style={{ padding: 40, textAlign: 'center', color: D.textDim, fontSize: 13 }}>No closed positions</div>
+            : <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead><tr><Th>Closed</Th><Th>Coin</Th><Th>Type</Th><Th right>Qty</Th><Th right>Entry</Th><Th right>Exit</Th><Th right>Realized P&L</Th></tr></thead>
+                <tbody>
+                  {closed.map(function(p) {
+                    const pnl = parseFloat(p.realized_pnl);
+                    return (
+                      <tr key={p.id}>
+                        <Td style={{ color: D.textDim, fontSize: 12 }}>{formatTime(p.closed_at)}</Td>
+                        <Td style={{ fontWeight: 600, color: D.textBright }}>{p.coin_symbol}</Td>
+                        <Td><Badge label={p.position_type} color={p.position_type === 'long' ? D.green : D.red} /></Td>
+                        <Td right>{formatQty(p.quantity)}</Td>
+                        <Td right style={{ color: D.textDim }}>{formatPrice(p.entry_price)}</Td>
+                        <Td right>{formatPrice(p.exit_price)}</Td>
+                        <Td right style={{ color: pnl >= 0 ? D.green : D.red, fontWeight: 600 }}>{formatPnl(pnl)}</Td>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    );
+                  })}
+                </tbody>
+              </table>
           }
-        </div>
+        </Panel>
       )}
 
-      {/* Portfolio Performance Graph */}
-      {subTab === 'performance' && (
-        <div style={panel}>
-          <div style={{ padding: '12px 16px', borderBottom: `1px solid ${D.border}`, fontSize: 11, letterSpacing: 3, color: D.cyan, fontWeight: 700, textTransform: 'uppercase' }}>
-            Portfolio Value — Last 24H
-          </div>
+      {/* Performance */}
+      {subTab === 'Performance' && (
+        <Panel D={D}>
+          <div style={{ padding: '12px 16px', borderBottom: `1px solid ${D.border}`, fontSize: 13, fontWeight: 600, color: D.textBright }}>Portfolio Value — Last 24H</div>
           <div style={{ padding: 16 }}>
-            {perfLoading ? (
-              <div style={{ height: 260, display: 'flex', alignItems: 'center', justifyContent: 'center', color: D.textDim, fontFamily: 'monospace', fontSize: 13 }}>
-                Building performance chart…
-              </div>
-            ) : perfData.length < 2 ? (
-              <div style={{ height: 260, display: 'flex', alignItems: 'center', justifyContent: 'center', color: D.textDim, fontFamily: 'monospace', fontSize: 13 }}>
-                Not enough data yet — check back after a few price updates
-              </div>
-            ) : (
-              <>
-                <div style={{ display: 'flex', gap: 24, marginBottom: 16, flexWrap: 'wrap' }}>
-                  {[
-                    { label: 'Start Value', val: `$${perfData[0]?.value?.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` },
-                    { label: 'Current Value', val: `$${perfData[perfData.length-1]?.value?.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` },
-                    { label: '24H Change', val: (() => {
-                        const change = perfData[perfData.length-1]?.value - perfData[0]?.value;
-                        return `${change >= 0 ? '+' : '-'}$${Math.abs(change).toFixed(2)}`;
-                      })(),
-                      color: (perfData[perfData.length-1]?.value - perfData[0]?.value) >= 0 ? D.green : D.red
-                    },
-                  ].map(s => (
-                    <div key={s.label}>
-                      <div style={{ fontSize: 11, color: D.textDim, fontWeight: 700, letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 4 }}>{s.label}</div>
-                      <div style={{ fontFamily: 'monospace', fontSize: 18, fontWeight: 700, color: s.color || D.textBright }}>{s.val}</div>
+            {perfLoading
+              ? <div style={{ height: 220, display: 'flex', alignItems: 'center', justifyContent: 'center', color: D.textDim, fontSize: 13 }}>Building chart…</div>
+              : perfData.length < 2
+              ? <div style={{ height: 220, display: 'flex', alignItems: 'center', justifyContent: 'center', color: D.textDim, fontSize: 13 }}>Not enough data yet</div>
+              : <>
+                  <div style={{ display: 'flex', gap: 24, marginBottom: 14 }}>
+                    <div>
+                      <div style={{ fontSize: 11, color: D.textDim, marginBottom: 3 }}>Start</div>
+                      <div style={{ fontSize: 15, fontWeight: 600, color: D.textBright }}>${perfData[0]?.value?.toLocaleString('en-US', { minimumFractionDigits: 2 })}</div>
                     </div>
-                  ))}
-                </div>
-                <ResponsiveContainer width="100%" height={240}>
-                  <LineChart data={perfData} margin={{ top: 4, right: 4, left: 4, bottom: 4 }}>
-                    <CartesianGrid strokeDasharray="2 4" stroke={D.border} />
-                    <XAxis dataKey="t" tick={{ fill: D.textDim, fontSize: 10, fontFamily: 'monospace' }} tickLine={false} axisLine={{ stroke: D.border }} interval="preserveStartEnd" />
-                    <YAxis tick={{ fill: D.textDim, fontSize: 10, fontFamily: 'monospace' }} tickLine={false} axisLine={false} width={70}
-                      tickFormatter={v => `$${(v/1000).toFixed(1)}k`} />
-                    <Tooltip content={<CustomTooltip />} />
-                    <Line type="monotone" dataKey="value" stroke={D.cyan} strokeWidth={2} dot={false} activeDot={{ r: 4, fill: D.cyan }} />
-                  </LineChart>
-                </ResponsiveContainer>
-              </>
-            )}
+                    <div>
+                      <div style={{ fontSize: 11, color: D.textDim, marginBottom: 3 }}>Now</div>
+                      <div style={{ fontSize: 15, fontWeight: 600, color: D.textBright }}>${perfData[perfData.length - 1]?.value?.toLocaleString('en-US', { minimumFractionDigits: 2 })}</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 11, color: D.textDim, marginBottom: 3 }}>Change</div>
+                      <div style={{ fontSize: 15, fontWeight: 600, color: (perfData[perfData.length-1]?.value - perfData[0]?.value) >= 0 ? D.green : D.red }}>
+                        {formatPnl(perfData[perfData.length-1]?.value - perfData[0]?.value)}
+                      </div>
+                    </div>
+                  </div>
+                  <ResponsiveContainer width="100%" height={200}>
+                    <LineChart data={perfData} margin={{ top: 4, right: 4, left: 4, bottom: 4 }}>
+                      <CartesianGrid strokeDasharray="2 4" stroke={D.border} />
+                      <XAxis dataKey="t" tick={{ fill: D.textDim, fontSize: 10 }} tickLine={false} axisLine={{ stroke: D.border }} interval="preserveStartEnd" />
+                      <YAxis tick={{ fill: D.textDim, fontSize: 10 }} tickLine={false} axisLine={false} width={64} tickFormatter={v => '$' + (v/1000).toFixed(1) + 'k'} />
+                      <Tooltip content={<PerfTooltip />} />
+                      <Line type="monotone" dataKey="value" stroke={D.blue} strokeWidth={2} dot={false} activeDot={{ r: 3, fill: D.blue }} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </>
+            }
           </div>
-        </div>
+        </Panel>
       )}
 
       {/* Trade Modal */}
@@ -308,21 +261,21 @@ export default function PortfolioTab({ portfolioId, portfolio, prices, coins, on
           onClose={() => setShowTrade(false)} onSuccess={onRefresh} />
       )}
 
-      {/* Square-Off Modal */}
-      {showSqOff && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)' }}
-          onClick={() => setShowSqOff(false)}>
-          <div style={{ background: D.panel, border: `1px solid ${D.border}`, borderRadius: 12, padding: 24, width: '90%', maxWidth: 380, boxShadow: '0 20px 60px rgba(0,0,0,0.5)' }}
+      {/* Square Off confirmation */}
+      {showSquare && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)' }}
+          onClick={() => setShowSquare(false)}>
+          <div className="slide-up" style={{ background: D.panel, border: `1px solid ${D.border}`, borderRadius: 10, padding: 24, width: '90%', maxWidth: 360 }}
             onClick={e => e.stopPropagation()}>
-            <h3 style={{ fontWeight: 800, fontSize: 14, letterSpacing: 2, color: D.red, textTransform: 'uppercase', marginBottom: 12 }}>Confirm Square Off All</h3>
-            <p style={{ fontFamily: 'monospace', color: D.text, fontSize: 13, lineHeight: 1.6, marginBottom: 16 }}>
-              This will close all {holdings.length} open position{holdings.length !== 1 ? 's' : ''} at current market prices. Cannot be undone.
+            <div style={{ fontSize: 14, fontWeight: 600, color: D.textBright, marginBottom: 10 }}>Square Off All Positions?</div>
+            <p style={{ fontSize: 13, color: D.text, lineHeight: 1.6, marginBottom: 16 }}>
+              This will close all {holdings.length} open position{holdings.length !== 1 ? 's' : ''} at current market prices. This cannot be undone.
             </p>
-            {sqError && <p style={{ color: D.red, fontFamily: 'monospace', fontSize: 12, marginBottom: 12 }}>{sqError}</p>}
-            <div style={{ display: 'flex', gap: 10 }}>
-              <button onClick={() => setShowSqOff(false)} style={{ flex: 1, padding: 10, borderRadius: 6, border: `1px solid ${D.border}`, background: 'none', color: D.textDim, fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>Cancel</button>
-              <button onClick={handleSquareOff} disabled={sqLoading} style={{ flex: 1, padding: 10, borderRadius: 6, border: `1px solid ${D.red}`, background: `${D.red}15`, color: D.red, fontWeight: 700, fontSize: 12, cursor: 'pointer', opacity: sqLoading ? 0.5 : 1 }}>
-                {sqLoading ? 'Closing…' : 'Square Off All'}
+            {squareErr && <div style={{ fontSize: 12, color: D.red, marginBottom: 12 }}>{squareErr}</div>}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={() => setShowSquare(false)} style={{ flex: 1, padding: 9, borderRadius: 6, border: `1px solid ${D.border}`, background: 'none', color: D.text, fontSize: 13, cursor: 'pointer' }}>Cancel</button>
+              <button onClick={handleSquareOff} disabled={squareLoad} style={{ flex: 1, padding: 9, borderRadius: 6, border: 'none', background: D.red, color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer', opacity: squareLoad ? 0.6 : 1 }}>
+                {squareLoad ? 'Closing…' : 'Confirm'}
               </button>
             </div>
           </div>

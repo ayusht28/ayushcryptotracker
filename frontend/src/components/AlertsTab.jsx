@@ -1,59 +1,49 @@
-// frontend/src/components/AlertsTab.jsx
-// Create, list, and delete price alerts. Polls the API every 10 seconds.
-
 import { useState, useEffect, useCallback } from 'react';
+import { Panel, Badge, Input, Select, Button, Label, formatPrice, formatTime } from './ui';
 import { fetchAlerts, createAlert, deleteAlert, getErrorMessage } from '../api/gateway';
 
-const fmtPrice = n => {
-  if (!n && n !== 0) return '—';
-  return n > 1 ? `$${(+n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : `$${(+n).toFixed(5)}`;
-};
+export default function AlertsTab({ portfolioId, prices, D }) {
+  const [alerts,  setAlerts]  = useState([]);
+  const [coinId,  setCoinId]  = useState('');
+  const [cond,    setCond]    = useState('above');
+  const [target,  setTarget]  = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error,   setError]   = useState('');
+  const [success, setSuccess] = useState('');
 
-const fmtTime = d => d ? new Date(d).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+  useEffect(function setDefaultCoin() {
+    if (prices.length && !coinId) setCoinId(prices[0].id);
+  }, [prices, coinId]);
 
-export default function AlertsTab({ portfolioId, prices }) {
-  const [alerts, setAlerts]     = useState([]);
-  const [form, setForm]         = useState({ coinId: '', condition: 'above', targetPrice: '' });
-  const [loading, setLoading]   = useState(false);
-  const [error, setError]       = useState('');
-  const [success, setSuccess]   = useState('');
-
-  const coins = prices;
-
-  const loadAlerts = useCallback(async () => {
+  const loadAlerts = useCallback(async function() {
     if (!portfolioId) return;
     try {
       const data = await fetchAlerts(portfolioId);
       setAlerts(data.alerts ?? []);
-    } catch (e) {
-      console.error('[AlertsTab] fetch error:', e.message);
+    } catch (err) {
+      console.error('fetchAlerts failed:', err.message);
     }
   }, [portfolioId]);
 
-  // Initial load + poll every 10s
-  useEffect(() => {
+  useEffect(function startPolling() {
     loadAlerts();
-    const iv = setInterval(loadAlerts, 10000);
-    return () => clearInterval(iv);
+    const interval = setInterval(loadAlerts, 10000);
+    return () => clearInterval(interval);
   }, [loadAlerts]);
 
-  // Set default coin on first load
-  useEffect(() => {
-    if (coins.length && !form.coinId) setForm(f => ({ ...f, coinId: coins[0].id }));
-  }, [coins, form.coinId]);
+  async function handleCreate() {
+    const tp = parseFloat(target);
+    if (!coinId) return setError('Select a coin');
+    if (isNaN(tp) || tp <= 0) return setError('Enter a valid target price');
 
-  const handleCreate = async () => {
-    const tp = parseFloat(form.targetPrice);
-    if (!form.coinId) return setError('Please select a coin');
-    if (isNaN(tp) || tp <= 0) return setError('Target price must be greater than 0');
-    setLoading(true); setError(''); setSuccess('');
+    setLoading(true);
+    setError('');
+    setSuccess('');
+
     try {
-      const coin = coins.find(c => c.id === form.coinId);
-      await createAlert(portfolioId, {
-        coinId: form.coinId, symbol: coin.symbol,
-        condition: form.condition, targetPrice: tp,
-      });
-      setForm(f => ({ ...f, targetPrice: '' }));
+      const coin = prices.find(c => c.id === coinId);
+      await createAlert(portfolioId, { coinId, symbol: coin.symbol, condition: cond, targetPrice: tp });
+      setTarget('');
       setSuccess('Alert created');
       setTimeout(() => setSuccess(''), 3000);
       loadAlerts();
@@ -62,165 +52,127 @@ export default function AlertsTab({ portfolioId, prices }) {
     } finally {
       setLoading(false);
     }
-  };
+  }
 
-  const handleDelete = async (alertId) => {
+  async function handleDelete(alertId) {
     try {
       await deleteAlert(alertId);
       loadAlerts();
     } catch (err) {
       setError(getErrorMessage(err));
     }
-  };
+  }
 
-  const getPrice = (coinId) => {
-    const c = prices.find(p => p.id === coinId);
-    return c ? parseFloat(c.price_usd) : 0;
-  };
+  function getPrice(coinId) {
+    const coin = prices.find(p => p.id === coinId);
+    return coin ? parseFloat(coin.price_usd) : 0;
+  }
 
-  const active    = alerts.filter(a => a.status === 'active');
-  const triggered = alerts.filter(a => a.status === 'triggered');
+  const activeAlerts    = alerts.filter(a => a.status === 'active');
+  const triggeredAlerts = alerts.filter(a => a.status === 'triggered');
+
+  function Th({ children, right }) {
+    return <th style={{ padding: '10px 16px', fontSize: 11, fontWeight: 500, color: D.textDim, textAlign: right ? 'right' : 'left', borderBottom: `1px solid ${D.border}` }}>{children}</th>;
+  }
+
+  function Td({ children, right, style }) {
+    return <td style={{ padding: '12px 16px', fontSize: 13, color: D.text, textAlign: right ? 'right' : 'left', borderBottom: `1px solid ${D.border}`, ...style }}>{children}</td>;
+  }
 
   return (
-    <div className="grid grid-cols-[1fr_280px] gap-4 items-start">
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 280px', gap: 16, alignItems: 'start' }}>
       {/* Main */}
-      <div className="space-y-4">
-        {/* Active Alerts */}
-        <div className="bg-[#0c0c1a] border border-[#18183a] rounded-lg overflow-hidden">
-          <div className="px-4 py-3 border-b border-[#18183a]">
-            <span className="font-['Orbitron'] text-[11px] tracking-[3px] text-[#00d4ff] uppercase">
-              Active Alerts ({active.length})
-            </span>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {/* Active alerts */}
+        <Panel D={D}>
+          <div style={{ padding: '12px 16px', borderBottom: `1px solid ${D.border}`, fontSize: 13, fontWeight: 600, color: D.textBright }}>
+            Active Alerts ({activeAlerts.length})
           </div>
-          {active.length === 0
-            ? <p className="py-10 text-center text-[#50507a] font-mono text-sm">No active alerts</p>
-            : (
-              <table className="w-full border-collapse">
-                <thead><tr className="border-b border-[#18183a]">
-                  {['Coin','Condition','Target','Current','Distance',''].map((h, i) => (
-                    <th key={i} className={`px-4 py-2.5 font-['Rajdhani'] text-[11px] tracking-widest text-[#50507a] uppercase ${i > 1 ? 'text-right' : 'text-left'}`}>{h}</th>
-                  ))}
-                </tr></thead>
+          {activeAlerts.length === 0
+            ? <div style={{ padding: 32, textAlign: 'center', color: D.textDim, fontSize: 13 }}>No active alerts</div>
+            : <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead><tr><Th>Coin</Th><Th>Condition</Th><Th right>Target</Th><Th right>Current</Th><Th right>Distance</Th><Th right></Th></tr></thead>
                 <tbody>
-                  {active.map(a => {
-                    const cur  = getPrice(a.coin_id);
-                    const dist = cur ? ((parseFloat(a.target_price) - cur) / cur * 100) : 0;
+                  {activeAlerts.map(function(alert) {
+                    const current  = getPrice(alert.coin_id);
+                    const distance = current ? ((parseFloat(alert.target_price) - current) / current * 100) : 0;
                     return (
-                      <tr key={a.id} className="border-b border-[#0f0f20]">
-                        <td className="px-4 py-3 font-['Rajdhani'] font-bold text-[#e8e8ff]">{a.coin_symbol}</td>
-                        <td className="px-4 py-3">
-                          <span className={`text-xs font-mono px-1.5 py-0.5 rounded border ${a.condition === 'above' ? 'text-[#00ff88] border-[#00ff8840] bg-[#00ff8810]' : 'text-[#ff3355] border-[#ff335540] bg-[#ff335510]'}`}>
-                            {a.condition.toUpperCase()}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-right font-mono text-[#ffd700] text-sm">{fmtPrice(a.target_price)}</td>
-                        <td className="px-4 py-3 text-right font-mono text-[#e8e8ff] text-sm">{fmtPrice(cur)}</td>
-                        <td className="px-4 py-3 text-right">
-                          <span className={`text-xs font-mono px-1.5 py-0.5 rounded border ${dist >= 0 ? 'text-[#00ff88] border-[#00ff8840] bg-[#00ff8810]' : 'text-[#ff3355] border-[#ff335540] bg-[#ff335510]'}`}>
-                            {dist >= 0 ? '+' : ''}{dist.toFixed(2)}%
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-right">
-                          <button onClick={() => handleDelete(a.id)}
-                            className="text-[10px] font-mono px-2 py-1 border border-[#18183a] text-[#ff3355] rounded hover:bg-[#ff335520] hover:border-[#ff3355] transition-all uppercase tracking-widest">
+                      <tr key={alert.id}>
+                        <Td style={{ fontWeight: 600, color: D.textBright }}>{alert.coin_symbol}</Td>
+                        <Td><Badge label={alert.condition} color={alert.condition === 'above' ? D.green : D.red} /></Td>
+                        <Td right style={{ color: D.gold, fontWeight: 600 }}>{formatPrice(alert.target_price)}</Td>
+                        <Td right style={{ color: D.textBright }}>{formatPrice(current)}</Td>
+                        <Td right><Badge label={(distance >= 0 ? '+' : '') + distance.toFixed(2) + '%'} color={distance >= 0 ? D.green : D.red} /></Td>
+                        <Td right>
+                          <button onClick={() => handleDelete(alert.id)} style={{ fontSize: 11, color: D.red, background: 'none', border: `1px solid ${D.border}`, borderRadius: 4, padding: '3px 8px', cursor: 'pointer' }}>
                             Delete
                           </button>
-                        </td>
+                        </Td>
                       </tr>
                     );
                   })}
                 </tbody>
               </table>
-            )
           }
-        </div>
+        </Panel>
 
-        {/* Triggered Alerts */}
-        {triggered.length > 0 && (
-          <div className="bg-[#0c0c1a] border border-[#18183a] rounded-lg overflow-hidden">
-            <div className="px-4 py-3 border-b border-[#18183a]">
-              <span className="font-['Orbitron'] text-[11px] tracking-[3px] text-[#ffd700] uppercase">
-                Triggered ({triggered.length})
-              </span>
+        {/* Triggered alerts */}
+        {triggeredAlerts.length > 0 && (
+          <Panel D={D}>
+            <div style={{ padding: '12px 16px', borderBottom: `1px solid ${D.border}`, fontSize: 13, fontWeight: 600, color: D.textBright }}>
+              Triggered ({triggeredAlerts.length})
             </div>
-            <table className="w-full border-collapse">
-              <thead><tr className="border-b border-[#18183a]">
-                {['Triggered At','Coin','Condition','Target'].map((h, i) => (
-                  <th key={i} className={`px-4 py-2.5 font-['Rajdhani'] text-[11px] tracking-widest text-[#50507a] uppercase ${i > 1 ? 'text-right' : 'text-left'}`}>{h}</th>
-                ))}
-              </tr></thead>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead><tr><Th>Triggered</Th><Th>Coin</Th><Th>Condition</Th><Th right>Target</Th></tr></thead>
               <tbody>
-                {triggered.map(a => (
-                  <tr key={a.id} className="border-b border-[#0f0f20]">
-                    <td className="px-4 py-3 text-[#50507a] font-mono text-xs">{fmtTime(a.triggered_at)}</td>
-                    <td className="px-4 py-3 font-['Rajdhani'] font-bold text-[#e8e8ff]">{a.coin_symbol}</td>
-                    <td className="px-4 py-3 text-right">
-                      <span className="text-xs font-mono px-1.5 py-0.5 rounded border text-[#ffd700] border-[#ffd70040] bg-[#ffd70010]">
-                        {a.condition.toUpperCase()}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-right font-mono text-[#ffd700] text-sm">{fmtPrice(a.target_price)}</td>
-                  </tr>
-                ))}
+                {triggeredAlerts.map(function(alert) {
+                  return (
+                    <tr key={alert.id}>
+                      <Td style={{ color: D.textDim, fontSize: 12 }}>{formatTime(alert.triggered_at)}</Td>
+                      <Td style={{ fontWeight: 600, color: D.textBright }}>{alert.coin_symbol}</Td>
+                      <Td><Badge label={alert.condition} color={D.gold} /></Td>
+                      <Td right style={{ color: D.gold }}>{formatPrice(alert.target_price)}</Td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
-          </div>
+          </Panel>
         )}
       </div>
 
-      {/* Create Alert Form */}
-      <div className="bg-[#0c0c1a] border border-[#18183a] rounded-lg overflow-hidden sticky top-0">
-        <div className="px-4 py-3 border-b border-[#18183a]">
-          <span className="font-['Orbitron'] text-[11px] tracking-[3px] text-[#ffd700] uppercase">New Alert</span>
-        </div>
-        <div className="p-4 space-y-3">
+      {/* Create form */}
+      <Panel D={D} style={{ position: 'sticky', top: 80 }}>
+        <div style={{ padding: '12px 16px', borderBottom: `1px solid ${D.border}`, fontSize: 13, fontWeight: 600, color: D.textBright }}>New Alert</div>
+        <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div>
-            <label className="block text-xs font-['Rajdhani'] tracking-widest text-[#50507a] uppercase mb-1.5">Coin</label>
-            <select value={form.coinId} onChange={e => setForm(f => ({ ...f, coinId: e.target.value }))}
-              className="w-full bg-[#07070f] border border-[#18183a] text-[#e8e8ff] font-mono text-xs px-3 py-2 rounded focus:border-[#ffd700] focus:outline-none">
-              {coins.map(c => <option key={c.id} value={c.id}>{c.symbol} — {c.name}</option>)}
-            </select>
+            <Label D={D}>Coin</Label>
+            <Select value={coinId} onChange={setCoinId} options={prices.map(c => ({ value: c.id, label: `${c.symbol} — ${c.name}` }))} D={D} />
           </div>
           <div>
-            <label className="block text-xs font-['Rajdhani'] tracking-widest text-[#50507a] uppercase mb-1.5">Condition</label>
-            <div className="grid grid-cols-2 gap-2">
-              {['above', 'below'].map(cond => (
-                <button key={cond} onClick={() => setForm(f => ({ ...f, condition: cond }))}
-                  className={`py-2 rounded border font-['Orbitron'] text-[10px] tracking-widest uppercase transition-all
-                    ${form.condition === cond
-                      ? cond === 'above' ? 'border-[#00ff88] text-[#00ff88] bg-[#00ff8810]' : 'border-[#ff3355] text-[#ff3355] bg-[#ff335510]'
-                      : 'border-[#18183a] text-[#50507a] hover:border-[#2e2e5a]'
-                    }`}
-                >{cond}</button>
-              ))}
+            <Label D={D}>Condition</Label>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+              {['above', 'below'].map(function(c) {
+                const isSelected = cond === c;
+                return (
+                  <button key={c} onClick={() => setCond(c)} style={{ padding: '7px', fontSize: 12, fontWeight: 500, borderRadius: 5, cursor: 'pointer', textTransform: 'capitalize', background: isSelected ? D.blue : 'transparent', border: `1px solid ${isSelected ? D.blue : D.border}`, color: isSelected ? '#ffffff' : D.text }}>
+                    {c}
+                  </button>
+                );
+              })}
             </div>
           </div>
           <div>
-            <label className="block text-xs font-['Rajdhani'] tracking-widest text-[#50507a] uppercase mb-1.5">Target Price (USD)</label>
-            <input type="number" value={form.targetPrice} onChange={e => setForm(f => ({ ...f, targetPrice: e.target.value }))}
-              placeholder="0.00" min="0" step="any"
-              className="w-full bg-[#07070f] border border-[#18183a] text-[#e8e8ff] font-mono text-sm px-3 py-2 rounded focus:border-[#ffd700] focus:outline-none"
-            />
+            <Label D={D}>Target Price (USD)</Label>
+            <Input value={target} onChange={setTarget} placeholder="0.00" type="number" D={D} />
           </div>
-
-          {form.targetPrice && form.coinId && (
-            <div className="bg-[#0f0f24] border border-[#18183a] rounded px-3 py-2 text-xs font-mono">
-              <span style={{ color: form.condition === 'above' ? '#00ff88' : '#ff3355' }}>
-                {form.condition === 'above' ? '↑' : '↓'} Alert when {coins.find(c => c.id === form.coinId)?.symbol || '?'} goes {form.condition}{' '}
-                {fmtPrice(parseFloat(form.targetPrice))}
-              </span>
-            </div>
-          )}
-
-          {error   && <p className="text-red-400 font-mono text-xs">{error}</p>}
-          {success && <p className="text-green-400 font-mono text-xs">{success}</p>}
-
-          <button onClick={handleCreate} disabled={loading}
-            className="w-full py-3 border border-[#ffd700] text-[#ffd700] rounded font-['Orbitron'] text-[10px] tracking-[2px] uppercase hover:bg-[#ffd70010] transition-all disabled:opacity-40">
+          {error   && <div style={{ fontSize: 12, color: D.red   }}>{error}</div>}
+          {success && <div style={{ fontSize: 12, color: D.green }}>{success}</div>}
+          <Button onClick={handleCreate} disabled={loading} variant="primary" D={D}>
             {loading ? 'Creating…' : 'Create Alert'}
-          </button>
+          </Button>
         </div>
-      </div>
+      </Panel>
     </div>
   );
 }

@@ -27,8 +27,13 @@ subscriber.on('message', async (channel, message) => {
 const app = express();
 
 app.get('/health', (req, res) => {
-  res.send('ok');
+  res.json({
+    status: 'ok',
+    subscriber: subscriber.status,
+    uptime: process.uptime(),
+  });
 });
+
 app.listen(PORT, () => {
   console.log(`[notifier] Health endpoint on port ${PORT}`);
 });

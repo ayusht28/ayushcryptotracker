@@ -1,51 +1,47 @@
 import { useState, useEffect } from 'react';
 import { executeTrade, getErrorMessage } from '../api/gateway';
+import { Input, Select, Button, Label, formatPrice } from './ui';
 
 const TRADE_TYPES = ['buy', 'sell', 'short', 'cover'];
 
 export default function TradeModal({ portfolioId, coins, getPrice, onClose, onSuccess, D }) {
-  const [form, setForm]     = useState({ coinId: coins[0]?.id ?? '', type: 'buy', quantity: '', price: '' });
-  const [target, setTarget] = useState('');
+  const [coinId,   setCoinId]   = useState(coins[0]?.id ?? '');
+  const [type,     setType]     = useState('buy');
+  const [quantity, setQuantity] = useState('');
+  const [price,    setPrice]    = useState('');
+  const [target,   setTarget]   = useState('');
   const [stopLoss, setStopLoss] = useState('');
-  const [loading, setLoading]  = useState(false);
-  const [error, setError]      = useState('');
+  const [loading,  setLoading]  = useState(false);
+  const [error,    setError]    = useState('');
 
-  const TYPE_COLORS = {
-    buy:   D.green,
-    sell:  D.red,
-    short: D.gold,
-    cover: D.cyan,
-  };
+  useEffect(function autofillPrice() {
+    const currentPrice = getPrice(coinId);
+    if (currentPrice) {
+      setPrice(currentPrice > 10 ? currentPrice.toFixed(2) : currentPrice.toFixed(5));
+    }
+  }, [coinId, getPrice]);
 
-  useEffect(() => {
-    const p = getPrice(form.coinId);
-    if (p) setForm(f => ({ ...f, price: p > 10 ? p.toFixed(2) : p.toFixed(5) }));
-  }, [form.coinId, getPrice]);
-
-  const set = (key, val) => setForm(f => ({ ...f, [key]: val }));
-
-  const qty   = parseFloat(form.quantity) || 0;
-  const px    = parseFloat(form.price)    || 0;
-  const tp    = parseFloat(target)        || 0;
-  const sl    = parseFloat(stopLoss)      || 0;
+  const qty   = parseFloat(quantity) || 0;
+  const px    = parseFloat(price)    || 0;
+  const tp    = parseFloat(target)   || 0;
+  const sl    = parseFloat(stopLoss) || 0;
   const total = qty * px;
 
-  // P&L projections
-  const isLong    = form.type === 'buy' || form.type === 'cover';
-  const projProfit = tp && qty && px ? (isLong ? (tp - px) * qty : (px - tp) * qty) : null;
-  const projLoss   = sl && qty && px ? (isLong ? (sl - px) * qty : (px - sl) * qty) : null;
-  const profitPct  = projProfit !== null && px ? (projProfit / total) * 100 : null;
-  const lossPct    = projLoss   !== null && px ? (projLoss   / total) * 100 : null;
-  const riskReward = projProfit !== null && projLoss !== null && projLoss !== 0
-    ? Math.abs(projProfit / projLoss).toFixed(2) : null;
+  const isLong       = type === 'buy' || type === 'cover';
+  const projProfit   = tp && qty && px ? (isLong ? (tp - px) * qty : (px - tp) * qty) : null;
+  const projLoss     = sl && qty && px ? (isLong ? (sl - px) * qty : (px - sl) * qty) : null;
+  const riskReward   = projProfit !== null && projLoss !== null && projLoss !== 0 ? Math.abs(projProfit / projLoss).toFixed(2) : null;
 
-  const handleSubmit = async () => {
-    if (!qty || qty <= 0) return setError('Quantity must be > 0');
-    if (!px  || px  <= 0) return setError('Price must be > 0');
-    const coin = coins.find(c => c.id === form.coinId);
-    setLoading(true); setError('');
+  async function handleSubmit() {
+    if (!qty || qty <= 0) return setError('Quantity must be greater than 0');
+    if (!px  || px  <= 0) return setError('Price must be greater than 0');
+
+    const coin = coins.find(c => c.id === coinId);
+    setLoading(true);
+    setError('');
+
     try {
-      await executeTrade(portfolioId, { coinId: form.coinId, symbol: coin.symbol, type: form.type, quantity: qty, price: px });
+      await executeTrade(portfolioId, { coinId, symbol: coin.symbol, type, quantity: qty, price: px });
       onSuccess?.();
       onClose();
     } catch (err) {
@@ -53,111 +49,126 @@ export default function TradeModal({ portfolioId, coins, getPrice, onClose, onSu
     } finally {
       setLoading(false);
     }
-  };
+  }
 
-  const fmtPnl = n => n !== null ? `${n >= 0 ? '+' : '-'}$${Math.abs(n).toFixed(2)}` : '—';
+  function TypeButton({ t }) {
+    const isSelected = type === t;
+    return (
+      <button
+        onClick={() => setType(t)}
+        style={{
+          padding: '7px',
+          fontSize: 12,
+          fontWeight: 500,
+          borderRadius: 5,
+          cursor: 'pointer',
+          textTransform: 'capitalize',
+          background: isSelected ? D.blue : 'transparent',
+          border: `1px solid ${isSelected ? D.blue : D.border}`,
+          color: isSelected ? '#ffffff' : D.text,
+          transition: 'all 0.15s',
+        }}
+      >
+        {t}
+      </button>
+    );
+  }
 
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)' }}
-      onClick={onClose}>
-      <div style={{ background: D.panel, border: `1px solid ${D.borderHi || D.border}`, borderRadius: 12, width: '90%', maxWidth: 560, maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.5)' }}
-        onClick={e => e.stopPropagation()}>
-
+    <div
+      style={{ position: 'fixed', inset: 0, zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)' }}
+      onClick={onClose}
+    >
+      <div
+        className="slide-up"
+        style={{ background: D.panel, border: `1px solid ${D.border}`, borderRadius: 10, width: '90%', maxWidth: 480, maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }}
+        onClick={e => e.stopPropagation()}
+      >
         {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px', borderBottom: `1px solid ${D.border}` }}>
-          <span style={{ fontWeight: 800, fontSize: 14, letterSpacing: 2, color: D.cyan, textTransform: 'uppercase' }}>Execute Trade</span>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', color: D.textDim, fontSize: 22, cursor: 'pointer' }}>×</button>
+          <span style={{ fontSize: 14, fontWeight: 600, color: D.textBright }}>Execute Trade</span>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', color: D.textDim, fontSize: 20, cursor: 'pointer' }}>×</button>
         </div>
 
         <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
           {/* Coin */}
           <div>
-            <label style={{ display: 'block', fontSize: 11, fontWeight: 700, letterSpacing: 1.5, color: D.textDim, textTransform: 'uppercase', marginBottom: 6 }}>Coin</label>
-            <select value={form.coinId} onChange={e => set('coinId', e.target.value)}
-              style={{ width: '100%', background: D.bg, border: `1px solid ${D.border}`, color: D.textBright, fontFamily: "'Inter', sans-serif", fontSize: 13, padding: '8px 12px', borderRadius: 6, outline: 'none' }}>
-              {coins.map(c => <option key={c.id} value={c.id}>{c.symbol} — {c.name}</option>)}
-            </select>
+            <Label D={D}>Coin</Label>
+            <Select
+              value={coinId}
+              onChange={setCoinId}
+              options={coins.map(c => ({ value: c.id, label: `${c.symbol} — ${c.name}` }))}
+              D={D}
+            />
           </div>
 
-          {/* Trade type */}
+          {/* Type */}
           <div>
-            <label style={{ display: 'block', fontSize: 11, fontWeight: 700, letterSpacing: 1.5, color: D.textDim, textTransform: 'uppercase', marginBottom: 6 }}>Action</label>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 8 }}>
-              {TRADE_TYPES.map(t => (
-                <button key={t} onClick={() => set('type', t)} style={{
-                  padding: '9px 4px', borderRadius: 6, cursor: 'pointer',
-                  fontWeight: 700, fontSize: 11, letterSpacing: 1.5, textTransform: 'uppercase', transition: 'all 0.2s',
-                  background: form.type === t ? `${TYPE_COLORS[t]}20` : 'transparent',
-                  border: `1px solid ${form.type === t ? TYPE_COLORS[t] : D.border}`,
-                  color: form.type === t ? TYPE_COLORS[t] : D.textDim,
-                }}>{t}</button>
-              ))}
+            <Label D={D}>Action</Label>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
+              {TRADE_TYPES.map(t => <TypeButton key={t} t={t} />)}
             </div>
           </div>
 
           {/* Qty + Price */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            {[['Quantity', 'quantity', '0.00000'], ['Price (USD)', 'price', '0.00']].map(([label, key, ph]) => (
-              <div key={key}>
-                <label style={{ display: 'block', fontSize: 11, fontWeight: 700, letterSpacing: 1.5, color: D.textDim, textTransform: 'uppercase', marginBottom: 6 }}>{label}</label>
-                <input type="number" value={form[key]} onChange={e => set(key, e.target.value)} placeholder={ph} min="0"
-                  style={{ width: '100%', background: D.bg, border: `1px solid ${D.border}`, color: D.textBright, fontFamily: 'monospace', fontSize: 13, padding: '8px 12px', borderRadius: 6, outline: 'none' }}
-                />
-              </div>
-            ))}
+            <div>
+              <Label D={D}>Quantity</Label>
+              <Input value={quantity} onChange={setQuantity} placeholder="0.00" type="number" D={D} />
+            </div>
+            <div>
+              <Label D={D}>Price (USD)</Label>
+              <Input value={price} onChange={setPrice} placeholder="0.00" type="number" D={D} />
+            </div>
           </div>
 
           {/* Total */}
           {total > 0 && (
-            <div style={{ background: D.bg, border: `1px solid ${D.border}`, borderRadius: 6, padding: '8px 12px', fontFamily: 'monospace', fontSize: 13 }}>
-              <span style={{ color: D.textDim }}>Total: </span>
-              <span style={{ color: D.textBright, fontWeight: 700 }}>${total.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+            <div style={{ background: D.panel2, border: `1px solid ${D.border}`, borderRadius: 6, padding: '8px 12px', fontSize: 13, color: D.text }}>
+              Total: <span style={{ color: D.textBright, fontWeight: 600 }}>${total.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
             </div>
           )}
 
-          {/* ── P&L Calculator ── */}
-          <div style={{ background: D.bg, border: `1px solid ${D.border}`, borderRadius: 8, overflow: 'hidden' }}>
-            <div style={{ padding: '10px 14px', borderBottom: `1px solid ${D.border}`, fontSize: 11, fontWeight: 700, letterSpacing: 2, color: D.gold, textTransform: 'uppercase' }}>
-              📊 P&L Calculator
+          {/* P&L Calculator */}
+          <div style={{ background: D.panel2, border: `1px solid ${D.border}`, borderRadius: 8, overflow: 'hidden' }}>
+            <div style={{ padding: '10px 14px', borderBottom: `1px solid ${D.border}`, fontSize: 12, fontWeight: 600, color: D.textBright }}>
+              P&L Calculator
             </div>
             <div style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                 <div>
-                  <label style={{ display: 'block', fontSize: 11, fontWeight: 700, letterSpacing: 1.5, color: D.textDim, textTransform: 'uppercase', marginBottom: 5 }}>Target Price</label>
-                  <input type="number" value={target} onChange={e => setTarget(e.target.value)} placeholder="0.00" min="0"
-                    style={{ width: '100%', background: D.panel, border: `1px solid ${D.border}`, color: D.textBright, fontFamily: 'monospace', fontSize: 12, padding: '7px 10px', borderRadius: 5, outline: 'none' }}
-                  />
+                  <Label D={D}>Target Price</Label>
+                  <Input value={target} onChange={setTarget} placeholder="0.00" type="number" D={D} />
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: 11, fontWeight: 700, letterSpacing: 1.5, color: D.textDim, textTransform: 'uppercase', marginBottom: 5 }}>Stop Loss</label>
-                  <input type="number" value={stopLoss} onChange={e => setStopLoss(e.target.value)} placeholder="0.00" min="0"
-                    style={{ width: '100%', background: D.panel, border: `1px solid ${D.border}`, color: D.textBright, fontFamily: 'monospace', fontSize: 12, padding: '7px 10px', borderRadius: 5, outline: 'none' }}
-                  />
+                  <Label D={D}>Stop Loss</Label>
+                  <Input value={stopLoss} onChange={setStopLoss} placeholder="0.00" type="number" D={D} />
                 </div>
               </div>
 
               {(projProfit !== null || projLoss !== null) && (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8, marginTop: 4 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
                   {projProfit !== null && (
-                    <div style={{ background: `${D.green}12`, border: `1px solid ${D.green}40`, borderRadius: 6, padding: '10px 12px', textAlign: 'center' }}>
-                      <div style={{ fontSize: 10, color: D.textDim, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 4 }}>Target P&L</div>
-                      <div style={{ fontFamily: 'monospace', fontSize: 14, fontWeight: 700, color: projProfit >= 0 ? D.green : D.red }}>{fmtPnl(projProfit)}</div>
-                      <div style={{ fontSize: 10, color: D.textDim, marginTop: 2 }}>{profitPct !== null ? `${profitPct >= 0 ? '+' : ''}${profitPct.toFixed(2)}%` : ''}</div>
+                    <div style={{ background: D.panel, border: `1px solid ${D.border}`, borderRadius: 6, padding: '8px', textAlign: 'center' }}>
+                      <div style={{ fontSize: 10, color: D.textDim, marginBottom: 4 }}>Target P&L</div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: projProfit >= 0 ? D.green : D.red }}>
+                        {projProfit >= 0 ? '+' : '-'}${Math.abs(projProfit).toFixed(2)}
+                      </div>
                     </div>
                   )}
                   {projLoss !== null && (
-                    <div style={{ background: `${D.red}12`, border: `1px solid ${D.red}40`, borderRadius: 6, padding: '10px 12px', textAlign: 'center' }}>
-                      <div style={{ fontSize: 10, color: D.textDim, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 4 }}>Max Loss</div>
-                      <div style={{ fontFamily: 'monospace', fontSize: 14, fontWeight: 700, color: projLoss >= 0 ? D.green : D.red }}>{fmtPnl(projLoss)}</div>
-                      <div style={{ fontSize: 10, color: D.textDim, marginTop: 2 }}>{lossPct !== null ? `${lossPct >= 0 ? '+' : ''}${lossPct.toFixed(2)}%` : ''}</div>
+                    <div style={{ background: D.panel, border: `1px solid ${D.border}`, borderRadius: 6, padding: '8px', textAlign: 'center' }}>
+                      <div style={{ fontSize: 10, color: D.textDim, marginBottom: 4 }}>Max Loss</div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: projLoss >= 0 ? D.green : D.red }}>
+                        {projLoss >= 0 ? '+' : '-'}${Math.abs(projLoss).toFixed(2)}
+                      </div>
                     </div>
                   )}
                   {riskReward && (
-                    <div style={{ background: `${D.gold}12`, border: `1px solid ${D.gold}40`, borderRadius: 6, padding: '10px 12px', textAlign: 'center' }}>
-                      <div style={{ fontSize: 10, color: D.textDim, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 4 }}>Risk/Reward</div>
-                      <div style={{ fontFamily: 'monospace', fontSize: 14, fontWeight: 700, color: D.gold }}>1 : {riskReward}</div>
-                      <div style={{ fontSize: 10, color: parseFloat(riskReward) >= 2 ? D.green : D.red, marginTop: 2 }}>
-                        {parseFloat(riskReward) >= 2 ? '✓ Good ratio' : '⚠ Low ratio'}
+                    <div style={{ background: D.panel, border: `1px solid ${D.border}`, borderRadius: 6, padding: '8px', textAlign: 'center' }}>
+                      <div style={{ fontSize: 10, color: D.textDim, marginBottom: 4 }}>Risk/Reward</div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: parseFloat(riskReward) >= 2 ? D.green : D.gold }}>
+                        1 : {riskReward}
                       </div>
                     </div>
                   )}
@@ -166,16 +177,15 @@ export default function TradeModal({ portfolioId, coins, getPrice, onClose, onSu
             </div>
           </div>
 
-          {error && <p style={{ color: D.red, fontFamily: 'monospace', fontSize: 12, padding: '8px 12px', background: `${D.red}15`, borderRadius: 4, border: `1px solid ${D.red}30` }}>{error}</p>}
+          {error && (
+            <div style={{ fontSize: 12, color: D.red, padding: '8px 12px', background: D.red + '15', borderRadius: 5 }}>
+              {error}
+            </div>
+          )}
 
-          <button onClick={handleSubmit} disabled={loading} style={{
-            width: '100%', padding: '12px', borderRadius: 6, cursor: loading ? 'not-allowed' : 'pointer',
-            border: `1px solid ${TYPE_COLORS[form.type]}`,
-            background: `${TYPE_COLORS[form.type]}15`,
-            color: TYPE_COLORS[form.type],
-            fontWeight: 800, fontSize: 12, letterSpacing: 2, textTransform: 'uppercase',
-            transition: 'all 0.2s', opacity: loading ? 0.5 : 1,
-          }}>{loading ? 'Executing…' : `Execute ${form.type.toUpperCase()}`}</button>
+          <Button onClick={handleSubmit} disabled={loading} variant="primary" D={D}>
+            {loading ? 'Executing…' : `${type.charAt(0).toUpperCase() + type.slice(1)} ${coins.find(c => c.id === coinId)?.symbol ?? ''}`}
+          </Button>
         </div>
       </div>
     </div>

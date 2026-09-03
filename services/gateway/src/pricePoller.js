@@ -55,7 +55,7 @@ async function persistPriceHistory(coins) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    for (const c of coins.filter(c => c.price_usd != null && c.price_usd > 0)) {
+    for (const c of coins) {
       await client.query(
         `INSERT INTO price_history
            (coin_id, coin_symbol, price_usd, market_cap, volume_24h, change_24h)
