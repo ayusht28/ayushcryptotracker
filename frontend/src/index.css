@@ -59,3 +59,18 @@ input[type='number'] {
 .slide-up    { animation: slide-up  0.2s ease; }
 .fade-in     { animation: fade-in   0.2s ease; }
 .slide-right { animation: slide-right 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+
+/* Mobile responsive — tables scroll horizontally instead of breaking */
+@media (max-width: 767px) {
+  table {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Stack grid layouts into single column on mobile */
+  .responsive-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
