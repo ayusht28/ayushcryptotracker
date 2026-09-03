@@ -1,16 +1,21 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Panel, Badge, Input, Select, Button, Label, formatPrice, formatTime } from './ui';
 import { fetchAlerts, createAlert, deleteAlert, getErrorMessage } from '../api/gateway';
+import { validateTargetPrice } from '../validation';
+import { useNotifications } from '../hooks/useNotifications';
 
 export default function AlertsTab({ portfolioId, prices, D }) {
-  const [alerts,         setAlerts]         = useState([]);
-  const [coinId,         setCoinId]         = useState('');
-  const [cond,           setCond]           = useState('above');
-  const [target,         setTarget]         = useState('');
-  const [loading,        setLoading]        = useState(false);
-  const [deleteConfirm,  setDeleteConfirm]  = useState(null);
-  const [error,          setError]          = useState('');
-  const [success,        setSuccess]        = useState('');
+  const [alerts,        setAlerts]        = useState([]);
+  const [coinId,        setCoinId]        = useState('');
+  const [cond,          setCond]          = useState('above');
+  const [target,        setTarget]        = useState('');
+  const [loading,       setLoading]       = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [error,         setError]         = useState('');
+  const [success,       setSuccess]       = useState('');
+
+  const { permission, requestPermission, sendNotification } = useNotifications();
+  const knownTriggeredIds = useRef(new Set());
 
   useEffect(function setDefaultCoin() {
     if (prices.length && !coinId) setCoinId(prices[0].id);
@@ -19,12 +24,25 @@ export default function AlertsTab({ portfolioId, prices, D }) {
   const loadAlerts = useCallback(async function() {
     if (!portfolioId) return;
     try {
-      const data = await fetchAlerts(portfolioId);
-      setAlerts(data.alerts ?? []);
+      const data       = await fetchAlerts(portfolioId);
+      const nextAlerts = data.alerts ?? [];
+
+      // Detect newly triggered alerts and fire a browser notification
+      nextAlerts.forEach(function(alert) {
+        if (alert.status === 'triggered' && !knownTriggeredIds.current.has(alert.id)) {
+          knownTriggeredIds.current.add(alert.id);
+          sendNotification(
+            `${alert.coin_symbol} alert triggered`,
+            `${alert.coin_symbol} went ${alert.condition} ${formatPrice(alert.target_price)}`
+          );
+        }
+      });
+
+      setAlerts(nextAlerts);
     } catch (err) {
       console.error('fetchAlerts failed:', err.message);
     }
-  }, [portfolioId]);
+  }, [portfolioId, sendNotification]);
 
   useEffect(function startPolling() {
     loadAlerts();
@@ -33,9 +51,9 @@ export default function AlertsTab({ portfolioId, prices, D }) {
   }, [loadAlerts]);
 
   async function handleCreate() {
-    const tp = parseFloat(target);
-    if (!coinId)             return setError('Select a coin');
-    if (isNaN(tp) || tp <= 0) return setError('Enter a valid target price');
+    const validationError = validateTargetPrice(target);
+    if (!coinId)          return setError('Select a coin');
+    if (validationError)  return setError(validationError);
 
     setLoading(true);
     setError('');
@@ -43,7 +61,7 @@ export default function AlertsTab({ portfolioId, prices, D }) {
 
     try {
       const coin = prices.find(c => c.id === coinId);
-      await createAlert(portfolioId, { coinId, symbol: coin.symbol, condition: cond, targetPrice: tp });
+      await createAlert(portfolioId, { coinId, symbol: coin.symbol, condition: cond, targetPrice: parseFloat(target) });
       setTarget('');
       setSuccess('Alert created');
       setTimeout(() => setSuccess(''), 3000);
@@ -85,6 +103,16 @@ export default function AlertsTab({ portfolioId, prices, D }) {
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 280px', gap: 16, alignItems: 'start' }}>
       {/* Main */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {/* Notification banner */}
+        {permission === 'default' && (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: D.blue + '12', border: `1px solid ${D.blue}40`, borderRadius: 8, padding: '10px 14px' }}>
+            <span style={{ fontSize: 13, color: D.textBright }}>Get a browser notification when an alert triggers</span>
+            <button onClick={requestPermission} style={{ fontSize: 12, fontWeight: 500, color: '#fff', background: D.blue, border: 'none', borderRadius: 5, padding: '5px 12px', cursor: 'pointer' }}>
+              Enable Notifications
+            </button>
+          </div>
+        )}
+
         {/* Active alerts */}
         <Panel D={D}>
           <div style={{ padding: '12px 16px', borderBottom: `1px solid ${D.border}`, fontSize: 13, fontWeight: 600, color: D.textBright }}>
