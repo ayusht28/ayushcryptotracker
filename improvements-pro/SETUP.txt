@@ -1,0 +1,15 @@
+HOW TO WIRE UP MULTIPLE PORTFOLIOS BACKEND
+
+1. Copy backend/portfolios.js into services/gateway/src/routes/portfolios.js
+
+2. In services/gateway/src/index.js add these two lines:
+
+   Near the top with the other route imports:
+       const portfoliosRoutes = require('./routes/portfolios');
+
+   Near the other app.use route mounts:
+       app.use('/api/portfolios', portfoliosRoutes);
+
+3. Add the contents of gateway-additions.js to the bottom of frontend/src/api/gateway.js
+
+That's it. The /api/portfolios/list, /create, /rename, /delete endpoints will be live.
