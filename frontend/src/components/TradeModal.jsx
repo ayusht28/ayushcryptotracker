@@ -11,6 +11,7 @@ export default function TradeModal({ portfolioId, coins, getPrice, onClose, onSu
   const [price,    setPrice]    = useState('');
   const [target,   setTarget]   = useState('');
   const [stopLoss, setStopLoss] = useState('');
+  const [notes,    setNotes]    = useState('');
   const [loading,  setLoading]  = useState(false);
   const [error,    setError]    = useState('');
 
@@ -27,10 +28,12 @@ export default function TradeModal({ portfolioId, coins, getPrice, onClose, onSu
   const sl    = parseFloat(stopLoss) || 0;
   const total = qty * px;
 
-  const isLong       = type === 'buy' || type === 'cover';
-  const projProfit   = tp && qty && px ? (isLong ? (tp - px) * qty : (px - tp) * qty) : null;
-  const projLoss     = sl && qty && px ? (isLong ? (sl - px) * qty : (px - sl) * qty) : null;
-  const riskReward   = projProfit !== null && projLoss !== null && projLoss !== 0 ? Math.abs(projProfit / projLoss).toFixed(2) : null;
+  const isLong     = type === 'buy' || type === 'cover';
+  const projProfit = tp && qty && px ? (isLong ? (tp - px) * qty : (px - tp) * qty) : null;
+  const projLoss   = sl && qty && px ? (isLong ? (sl - px) * qty : (px - sl) * qty) : null;
+  const riskReward = projProfit !== null && projLoss !== null && projLoss !== 0
+    ? Math.abs(projProfit / projLoss).toFixed(2)
+    : null;
 
   async function handleSubmit() {
     if (!qty || qty <= 0) return setError('Quantity must be greater than 0');
@@ -41,7 +44,14 @@ export default function TradeModal({ portfolioId, coins, getPrice, onClose, onSu
     setError('');
 
     try {
-      await executeTrade(portfolioId, { coinId, symbol: coin.symbol, type, quantity: qty, price: px });
+      await executeTrade(portfolioId, {
+        coinId,
+        symbol:   coin.symbol,
+        type,
+        quantity: qty,
+        price:    px,
+        notes:    notes.trim() || null,
+      });
       onSuccess?.();
       onClose();
     } catch (err) {
@@ -84,7 +94,6 @@ export default function TradeModal({ portfolioId, coins, getPrice, onClose, onSu
         style={{ background: D.panel, border: `1px solid ${D.border}`, borderRadius: 10, width: '90%', maxWidth: 480, maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }}
         onClick={e => e.stopPropagation()}
       >
-        {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px', borderBottom: `1px solid ${D.border}` }}>
           <span style={{ fontSize: 14, fontWeight: 600, color: D.textBright }}>Execute Trade</span>
           <button onClick={onClose} style={{ background: 'none', border: 'none', color: D.textDim, fontSize: 20, cursor: 'pointer' }}>×</button>
@@ -102,7 +111,7 @@ export default function TradeModal({ portfolioId, coins, getPrice, onClose, onSu
             />
           </div>
 
-          {/* Type */}
+          {/* Action */}
           <div>
             <Label D={D}>Action</Label>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
@@ -128,6 +137,18 @@ export default function TradeModal({ portfolioId, coins, getPrice, onClose, onSu
               Total: <span style={{ color: D.textBright, fontWeight: 600 }}>${total.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
             </div>
           )}
+
+          {/* Notes */}
+          <div>
+            <Label D={D}>Notes (optional)</Label>
+            <textarea
+              value={notes}
+              onChange={e => setNotes(e.target.value)}
+              placeholder="e.g. bought the dip, DCA entry, swing trade…"
+              rows={2}
+              style={{ width: '100%', background: D.panel2, border: `1px solid ${D.border}`, borderRadius: 6, padding: '8px 12px', fontSize: 13, color: D.textBright, fontFamily: 'Inter, sans-serif', outline: 'none', resize: 'none' }}
+            />
+          </div>
 
           {/* P&L Calculator */}
           <div style={{ background: D.panel2, border: `1px solid ${D.border}`, borderRadius: 8, overflow: 'hidden' }}>
